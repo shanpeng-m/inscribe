@@ -4,25 +4,37 @@
   "version": "0.1.0",
   "identifier": "work.shanpeng.inscribe",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "pnpm dev:frontend",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm build:frontend",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
-        "title": "inscribe",
-        "width": 800,
-        "height": 600
+        "center": true,
+        "height": 920,
+        "minHeight": 720,
+        "minWidth": 1120,
+        "resizable": true,
+        "title": "Inscribe",
+        "width": 1440
       }
     ],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": ["'self'", "asset:", "blob:", "data:"],
+        "font-src": ["'self'", "data:"],
+        "img-src": ["'self'", "asset:", "blob:", "data:", "https:"],
+        "style-src": ["'self'", "'unsafe-inline'"]
+      }
     }
   },
   "bundle": {
     "active": true,
+    "category": "Productivity",
+    "longDescription": "A modern desktop publishing workspace for writing, organizing, and configuring blog content.",
+    "shortDescription": "Modern desktop publishing workspace",
     "targets": "all",
     "icon": [
       "icons/32x32.png",

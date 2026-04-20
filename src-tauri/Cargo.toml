@@ -1,8 +1,8 @@
 [package]
 name = "inscribe"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "Inscribe desktop publishing workspace"
+authors = ["Shanpeng Ma"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -20,6 +20,28 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+[profile.dev]
+incremental = true
+codegen-units = 16
+debug = true
+debug-assertions = true
+overflow-checks = true
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
+debug = false
+debug-assertions = false
+overflow-checks = false
+incremental = false
+
+[profile.release.build-override]
+opt-level = 3
+codegen-units = 1
