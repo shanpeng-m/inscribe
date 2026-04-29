@@ -330,6 +330,18 @@ fn save_internal_post(conn: &Connection, request: &SavePostRequest) -> Result<Po
     load_internal_post(conn, &request.file_name)
 }
 
+fn delete_internal_post(conn: &Connection, file_name: &str) -> Result<(), String> {
+    let affected = conn
+        .execute("DELETE FROM posts WHERE file_name = ?1", params![file_name])
+        .map_err(|error| format!("Failed to delete post from database: {error}"))?;
+
+    if affected == 0 {
+        return Err(format!("Post not found: {file_name}"));
+    }
+
+    Ok(())
+}
+
 fn normalize_workspace(workspace_path: &str) -> Result<PathBuf, String> {
     let path = PathBuf::from(workspace_path.trim());
     if workspace_path.trim().is_empty() {
@@ -342,6 +354,47 @@ fn normalize_workspace(workspace_path: &str) -> Result<PathBuf, String> {
         return Err(format!("Workspace is not a directory: {}", path.display()));
     }
     Ok(path)
+}
+
+fn config_dir(workspace: &Path) -> PathBuf {
+    workspace.join("config")
+}
+
+fn setting_path(workspace: &Path) -> PathBuf {
+    config_dir(workspace).join("setting.json")
+}
+
+fn posts_index_path(workspace: &Path) -> PathBuf {
+    config_dir(workspace).join("posts.json")
+}
+
+fn canonical_posts_dir(workspace: &Path) -> PathBuf {
+    workspace.join("content").join("posts")
+}
+
+fn legacy_posts_dir(workspace: &Path) -> PathBuf {
+    workspace.join("posts")
+}
+
+fn post_images_dir(workspace: &Path) -> PathBuf {
+    workspace.join("content").join("post-images")
+}
+
+fn resolve_posts_dir_for_read(workspace: &Path) -> PathBuf {
+    if canonical_posts_dir(workspace).exists() {
+        canonical_posts_dir(workspace)
+    } else {
+        legacy_posts_dir(workspace)
+    }
+}
+
+fn resolve_post_path_for_read(workspace: &Path, file_name: &str) -> PathBuf {
+    let canonical = canonical_posts_dir(workspace).join(format!("{file_name}.md"));
+    if canonical.exists() {
+        canonical
+    } else {
+        legacy_posts_dir(workspace).join(format!("{file_name}.md"))
+    }
 }
 
 fn read_json_map(path: &Path) -> Result<Map<String, Value>, String> {
@@ -505,48 +558,48 @@ fn parse_post_file(path: &Path) -> Result<PostDetail, String> {
 }
 
 fn load_site_config(workspace: &Path) -> Result<SiteConfig, String> {
-    let setting_path = workspace.join("config").join("setting.json");
-    let map = read_json_map(&setting_path)?;
+    let map = read_json_map(&setting_path(workspace))?;
     let config = map
         .get("config")
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
+    let defaults = default_site_config();
 
     Ok(SiteConfig {
-        title: string_value(&config, "title"),
+        title: string_value(&config, "title").if_empty_then(defaults.title),
         description: string_value(&config, "description"),
         domain: string_value(&config, "domain"),
         repository: string_value(&config, "repository"),
-        theme_name: string_value(&config, "themeName"),
-        site_name: string_value(&config, "siteName"),
-        branch: string_value(&config, "branch"),
-        language: string_value(&config, "language"),
-        platform: string_value(&config, "platform"),
+        theme_name: string_value(&config, "themeName").if_empty_then(defaults.theme_name),
+        site_name: string_value(&config, "siteName").if_empty_then(defaults.site_name),
+        branch: string_value(&config, "branch").if_empty_then(defaults.branch),
+        language: string_value(&config, "language").if_empty_then(defaults.language),
+        platform: string_value(&config, "platform").if_empty_then(defaults.platform),
         username: string_value(&config, "username"),
         email: string_value(&config, "email"),
         token_username: string_value(&config, "tokenUsername"),
         token: string_value(&config, "token"),
         cname: string_value(&config, "cname"),
-        port: string_value(&config, "port"),
+        port: string_value(&config, "port").if_empty_then(defaults.port),
         server: string_value(&config, "server"),
         password: string_value(&config, "password"),
         private_key: string_value(&config, "privateKey"),
         remote_path: string_value(&config, "remotePath"),
         proxy_path: string_value(&config, "proxyPath"),
         proxy_port: string_value(&config, "proxyPort"),
-        enabled_proxy: string_value(&config, "enabledProxy"),
+        enabled_proxy: string_value(&config, "enabledProxy").if_empty_then(defaults.enabled_proxy),
         netlify_access_token: string_value(&config, "netlifyAccessToken"),
         netlify_site_id: string_value(&config, "netlifySiteId"),
     })
 }
 
 fn save_site_config_internal(workspace: &Path, site: &SiteConfig) -> Result<SiteConfig, String> {
-    let config_dir = workspace.join("config");
+    let config_dir = config_dir(workspace);
     fs::create_dir_all(&config_dir)
         .map_err(|error| format!("Failed to create {}: {error}", config_dir.display()))?;
 
-    let setting_path = config_dir.join("setting.json");
+    let setting_path = setting_path(workspace);
     let mut root = read_json_map(&setting_path)?;
     let mut config = root
         .get("config")
@@ -653,7 +706,7 @@ impl IfEmptyThen for String {
 }
 
 fn load_posts(workspace: &Path) -> Result<Vec<PostSummary>, String> {
-    let posts_dir = workspace.join("posts");
+    let posts_dir = resolve_posts_dir_for_read(workspace);
     if !posts_dir.exists() {
         return Ok(vec![]);
     }
@@ -694,11 +747,67 @@ fn load_posts(workspace: &Path) -> Result<Vec<PostSummary>, String> {
     Ok(posts)
 }
 
+fn write_posts_index(workspace: &Path, posts: &[PostSummary]) -> Result<(), String> {
+    let config_dir = config_dir(workspace);
+    fs::create_dir_all(&config_dir)
+        .map_err(|error| format!("Failed to create {}: {error}", config_dir.display()))?;
+
+    let mut root = Map::new();
+    let posts_value = serde_json::to_value(posts)
+        .map_err(|error| format!("Failed to serialize post index: {error}"))?;
+    root.insert("posts".into(), posts_value);
+
+    let json = serde_json::to_string_pretty(&Value::Object(root))
+        .map_err(|error| format!("Failed to serialize posts.json: {error}"))?;
+    let path = posts_index_path(workspace);
+    fs::write(&path, json).map_err(|error| format!("Failed to write {}: {error}", path.display()))
+}
+
+fn refresh_posts_index(workspace: &Path) -> Result<Vec<PostSummary>, String> {
+    let posts = load_posts(workspace)?;
+    write_posts_index(workspace, &posts)?;
+    Ok(posts)
+}
+
 fn ensure_posts_dir(workspace: &Path) -> Result<PathBuf, String> {
-    let posts_dir = workspace.join("posts");
+    let posts_dir = canonical_posts_dir(workspace);
     fs::create_dir_all(&posts_dir)
         .map_err(|error| format!("Failed to create {}: {error}", posts_dir.display()))?;
     Ok(posts_dir)
+}
+
+fn ensure_workspace_layout(workspace: &Path) -> Result<(), String> {
+    if !workspace.exists() {
+        fs::create_dir_all(workspace)
+            .map_err(|error| format!("Failed to create {}: {error}", workspace.display()))?;
+    }
+
+    if !workspace.is_dir() {
+        return Err(format!(
+            "Workspace is not a directory: {}",
+            workspace.display()
+        ));
+    }
+
+    let required_dirs = [
+        config_dir(workspace),
+        canonical_posts_dir(workspace),
+        post_images_dir(workspace),
+        workspace.join("themes"),
+        workspace.join("dist"),
+    ];
+
+    for dir in required_dirs {
+        fs::create_dir_all(&dir)
+            .map_err(|error| format!("Failed to create {}: {error}", dir.display()))?;
+    }
+
+    if !setting_path(workspace).exists() {
+        save_site_config_internal(workspace, &default_site_config())?;
+    }
+
+    refresh_posts_index(workspace)?;
+    Ok(())
 }
 
 fn serialize_post(post: &SavePostRequest) -> String {
@@ -729,6 +838,98 @@ isTop: {}\n\
     )
 }
 
+fn markdown_link_targets(content: &str) -> Vec<String> {
+    let mut targets = Vec::new();
+    let mut rest = content;
+
+    while let Some(start) = rest.find("](") {
+        let after_start = &rest[start + 2..];
+        if let Some(end) = after_start.find(')') {
+            let target = after_start[..end].trim();
+            if !target.is_empty() {
+                targets.push(target.to_string());
+            }
+            rest = &after_start[end + 1..];
+        } else {
+            break;
+        }
+    }
+
+    targets
+}
+
+fn is_external_target(value: &str) -> bool {
+    let lower = value.to_lowercase();
+    lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("data:")
+        || lower.starts_with("mailto:")
+}
+
+fn delete_workspace_media_if_local(workspace: &Path, target: &str) {
+    let clean = target
+        .split('#')
+        .next()
+        .unwrap_or(target)
+        .split('?')
+        .next()
+        .unwrap_or(target)
+        .trim()
+        .trim_start_matches('/');
+
+    if clean.is_empty() || is_external_target(clean) {
+        return;
+    }
+
+    let candidate = workspace.join(clean);
+    let Ok(canonical_workspace) = workspace.canonicalize() else {
+        return;
+    };
+    let Ok(canonical_candidate) = candidate.canonicalize() else {
+        return;
+    };
+
+    let allowed_media_roots = [
+        post_images_dir(workspace),
+        workspace.join("post-images"),
+        workspace.join("content").join("media"),
+    ];
+
+    let is_workspace_local = canonical_candidate.starts_with(&canonical_workspace);
+    let is_media_file = allowed_media_roots.iter().any(|root| {
+        root.canonicalize()
+            .map(|canonical_root| canonical_candidate.starts_with(canonical_root))
+            .unwrap_or(false)
+    });
+
+    if is_workspace_local && is_media_file && canonical_candidate.is_file() {
+        let _ = fs::remove_file(canonical_candidate);
+    }
+}
+
+fn delete_post_file(workspace: &Path, file_name: &str) -> Result<(), String> {
+    let path = resolve_post_path_for_read(workspace, file_name);
+    if !path.exists() {
+        return Err(format!("Post not found: {}", path.display()));
+    }
+
+    let detail = parse_post_file(&path)?;
+    let mut media_targets = markdown_link_targets(&detail.content);
+    if !detail.data.feature.trim().is_empty() {
+        media_targets.push(detail.data.feature);
+    }
+
+    fs::remove_file(&path)
+        .map_err(|error| format!("Failed to delete {}: {error}", path.display()))?;
+
+    for target in media_targets {
+        delete_workspace_media_if_local(workspace, &target);
+    }
+
+    refresh_posts_index(workspace)?;
+    Ok(())
+}
+
 #[tauri::command]
 fn load_workspace(
     app: tauri::AppHandle,
@@ -756,17 +957,39 @@ fn load_workspace(
     let workspace = normalize_workspace(&workspace_path)?;
     let site = load_site_config(&workspace)?;
     let themes = load_themes(&workspace)?;
-    let posts = load_posts(&workspace)?;
+    let posts = refresh_posts_index(&workspace)?;
 
     let summary = WorkspaceSummary {
         root: workspace.display().to_string(),
         posts_count: posts.len(),
-        has_site_config: workspace.join("config").join("setting.json").exists(),
+        has_site_config: setting_path(&workspace).exists(),
         current_theme: site.theme_name.clone(),
     };
 
     Ok(WorkspacePayload {
         summary,
+        site,
+        themes,
+        posts,
+    })
+}
+
+#[tauri::command]
+fn initialize_workspace(workspace_path: String) -> Result<WorkspacePayload, String> {
+    let workspace = normalize_workspace(&workspace_path)?;
+    ensure_workspace_layout(&workspace)?;
+
+    let site = load_site_config(&workspace)?;
+    let themes = load_themes(&workspace)?;
+    let posts = refresh_posts_index(&workspace)?;
+
+    Ok(WorkspacePayload {
+        summary: WorkspaceSummary {
+            root: workspace.display().to_string(),
+            posts_count: posts.len(),
+            has_site_config: true,
+            current_theme: site.theme_name.clone(),
+        },
         site,
         themes,
         posts,
@@ -785,7 +1008,7 @@ fn load_post(
     }
 
     let workspace = normalize_workspace(&workspace_path)?;
-    let path = workspace.join("posts").join(format!("{file_name}.md"));
+    let path = resolve_post_path_for_read(&workspace, &file_name);
     if !path.exists() {
         return Err(format!("Post not found: {}", path.display()));
     }
@@ -805,7 +1028,23 @@ fn save_post(app: tauri::AppHandle, request: SavePostRequest) -> Result<PostDeta
     let serialized = serialize_post(&request);
     fs::write(&path, serialized)
         .map_err(|error| format!("Failed to write {}: {error}", path.display()))?;
+    refresh_posts_index(&workspace)?;
     parse_post_file(&path)
+}
+
+#[tauri::command]
+fn delete_post(
+    app: tauri::AppHandle,
+    workspace_path: String,
+    file_name: String,
+) -> Result<(), String> {
+    if is_internal_workspace(&workspace_path) {
+        let conn = open_internal_db(&app)?;
+        return delete_internal_post(&conn, &file_name);
+    }
+
+    let workspace = normalize_workspace(&workspace_path)?;
+    delete_post_file(&workspace, &file_name)
 }
 
 #[tauri::command]
@@ -822,16 +1061,46 @@ fn save_site_settings(
     let workspace = normalize_workspace(&workspace_path)?;
     save_site_config_internal(&workspace, &site)
 }
+#[tauri::command]
+async fn run_blog_build(workspace_path: String) -> Result<String, String> {
+    if is_internal_workspace(&workspace_path) {
+        return Err("Internal database workspace doesn't support local builds yet.".into());
+    }
+
+    let _workspace = normalize_workspace(&workspace_path)?;
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let repo_root = manifest_dir
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .ok_or_else(|| "Failed to resolve Inscribe repository root.".to_string())?;
+
+    let output = std::process::Command::new("pnpm")
+        .arg("build:site")
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| format!("Failed to execute build command: {}", e))?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             load_workspace,
+            initialize_workspace,
             load_post,
             save_post,
-            save_site_settings
+            delete_post,
+            save_site_settings,
+            run_blog_build
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

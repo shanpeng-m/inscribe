@@ -3,6 +3,7 @@ import {
   CalendarDays,
   Check,
   FolderKanban,
+  FolderOpen,
   Globe,
   Menu,
   Palette,
@@ -11,12 +12,12 @@ import {
   Sparkles,
   SquarePen,
   Tag as TagIcon,
+  Trash2,
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeProvider, useTheme } from "@/components/theme-provider";
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import {
   Accordion,
   AccordionContent,
@@ -29,15 +30,20 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { type AppLanguage, LANGUAGE_OPTIONS, normalizeLanguageCode } from "@/i18n";
 import {
-  type AppLanguage,
-  DEFAULT_LANGUAGE,
-  LANGUAGE_OPTIONS,
-  normalizeLanguageCode,
-} from "@/i18n";
-import { loadPost, loadWorkspace, savePost, saveSiteSettings } from "@/lib/api";
+  deletePost,
+  initializeWorkspace,
+  loadPost,
+  loadWorkspace,
+  runBlogBuild,
+  savePost,
+  saveSiteSettings,
+  selectWorkspaceDirectory,
+} from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { PostDetail, SiteConfig, WorkspacePayload } from "@/types/inscribe";
 import pkg from "../package.json";
@@ -123,10 +129,26 @@ function SettingsField({ htmlFor, label, children }: SettingsFieldProps) {
     </div>
   );
 }
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+
+  return isMobile;
+}
 
 function AppContent() {
+  const isMobile = useIsMobile();
   const { t, i18n } = useTranslation();
   const { resolvedTheme, setTheme, theme } = useTheme();
+
   const [workspace, setWorkspace] = useState<WorkspacePayload | null>(null);
   const [siteDraft, setSiteDraft] = useState<SiteConfig | null>(null);
   const [selectedPostName, setSelectedPostName] = useState("");
@@ -135,11 +157,15 @@ function AppContent() {
   const [editorVisible, setEditorVisible] = useState(false);
   const [systemVisible, setSystemVisible] = useState(false);
   const [keyword, setKeyword] = useState("");
-  const [language, setLanguage] = useState<AppLanguage>(DEFAULT_LANGUAGE);
+  const [language, setLanguage] = useState<AppLanguage>(() =>
+    normalizeLanguageCode(i18n.resolvedLanguage ?? i18n.language)
+  );
   const [loadingPost, setLoadingPost] = useState(false);
   const [savingPost, setSavingPost] = useState(false);
   const [savingSite, setSavingSite] = useState(false);
-  const [savingSystem, setSavingSystem] = useState(false);
+  const [initializingWorkspace, setInitializingWorkspace] = useState(false);
+  const [deletingPost, setDeletingPost] = useState("");
+  const [building, setBuilding] = useState(false);
   const [status, setStatus] = useState(t("loadingReady"));
   const [error, setError] = useState("");
 
@@ -263,6 +289,41 @@ function AppContent() {
     [t]
   );
 
+  async function handleChooseWorkspace() {
+    try {
+      setInitializingWorkspace(true);
+      setError("");
+      const selected = await selectWorkspaceDirectory();
+      if (!selected) {
+        setStatus(t("workspaceSelectCanceled"));
+        return;
+      }
+
+      setStatus(t("workspaceInitializing"));
+      const payload = await initializeWorkspace(selected);
+      setWorkspace(payload);
+      setSiteDraft(payload.site);
+      setActiveSection("articles");
+      setStatus(t("workspaceInitialized", { path: payload.summary.root }));
+
+      if (payload.posts[0]) {
+        const detail = await loadPost(payload.summary.root, payload.posts[0].fileName);
+        setDraft(detail);
+        setSelectedPostName(detail.fileName);
+      } else {
+        setDraft(emptyPost());
+        setSelectedPostName("");
+        setEditorVisible(false);
+      }
+    } catch (selectError) {
+      const message = selectError instanceof Error ? selectError.message : String(selectError);
+      setError(message);
+      setStatus(t("workspaceInitializeFailed"));
+    } finally {
+      setInitializingWorkspace(false);
+    }
+  }
+
   async function handleSelectPost(fileName: string) {
     if (!workspace) {
       return;
@@ -328,6 +389,39 @@ function AppContent() {
     }
   }
 
+  async function handleDeletePost(fileName: string, title: string) {
+    if (!workspace) {
+      setError(t("workspaceRequired"));
+      return;
+    }
+
+    const confirmed = window.confirm(t("deletePostConfirm", { name: title || fileName }));
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setDeletingPost(fileName);
+      setError("");
+      await deletePost(workspace.summary.root, fileName);
+      const refreshed = await loadWorkspace(workspace.summary.root);
+      setWorkspace(refreshed);
+      setSiteDraft(refreshed.site);
+      setStatus(t("deletePostDone", { name: fileName }));
+
+      if (selectedPostName === fileName) {
+        setDraft(emptyPost());
+        setSelectedPostName("");
+        setEditorVisible(false);
+      }
+    } catch (deleteError) {
+      const message = deleteError instanceof Error ? deleteError.message : String(deleteError);
+      setError(message);
+    } finally {
+      setDeletingPost("");
+    }
+  }
+
   async function handleSaveSite() {
     if (!(workspace && siteDraft)) {
       setError(t("workspaceRequired"));
@@ -380,27 +474,40 @@ function AppContent() {
     void handleLoadWorkspace(DEFAULT_WORKSPACE);
   }, [handleLoadWorkspace]);
 
-  async function handleSaveSystem() {
+  async function handleLanguageChange(nextLanguage: AppLanguage) {
+    setLanguage(nextLanguage);
+    await i18n.changeLanguage(nextLanguage);
+    setStatus(t("saveSystemDone"));
+  }
+
+  const mobileMenus = menus.filter((menuItem) => ["articles", "tags"].includes(menuItem.key));
+  const displayMenus = isMobile ? mobileMenus : menus;
+
+  async function handleBuildSite() {
+    if (!workspace) return;
     try {
-      setSavingSystem(true);
-      await i18n.changeLanguage(language);
-      await handleLoadWorkspace(DEFAULT_WORKSPACE);
-      setSystemVisible(false);
-      setStatus(t("saveSystemDone"));
+      setBuilding(true);
+      setError("");
+      setStatus(t("buildingSite"));
+      await runBlogBuild(workspace.summary.root);
+      setStatus(t("buildSuccess"));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
     } finally {
-      setSavingSystem(false);
+      setBuilding(false);
     }
   }
 
   return (
-    <SidebarProvider defaultOpen>
+    <SidebarProvider defaultOpen={!isMobile}>
       <main className="app-shell">
         <div className="app-shell__ambient" />
         <AppSidebar
           activeSection={activeSection}
           appName={t("appName")}
           isDark={resolvedTheme === "dark"}
-          items={menus}
+          items={displayMenus}
           navigationLabel={t("menu")}
           onOpenSettings={() => setSystemVisible(true)}
           onSectionSelect={(section) => setActiveSection(section as Section)}
@@ -417,7 +524,7 @@ function AppContent() {
               <div className="app-toolbar__title">
                 <strong>{sectionTitle}</strong>
                 {error ? (
-                  <span className="app-toolbar__error">{error}</span>
+                  <span className="app-toolbar__error text-xs md:text-sm">{error}</span>
                 ) : (
                   <span className="app-toolbar__meta">{workspace?.posts.length ?? 0}</span>
                 )}
@@ -426,7 +533,7 @@ function AppContent() {
 
             <div className="app-toolbar__actions">
               {activeSection === "articles" ? (
-                <div className="search-field">
+                <div className="search-field hidden md:flex">
                   <Search className="search-field__icon size-4" />
                   <input
                     onChange={(event) => setKeyword(event.currentTarget.value)}
@@ -445,21 +552,39 @@ function AppContent() {
               </Button>
               <Button className="toolbar-create" onClick={startNewPost} type="button">
                 <Plus className="size-4" />
-                <span>{t("newArticle")}</span>
+                <span className="hidden md:inline">{t("newArticle")}</span>
               </Button>
             </div>
           </header>
 
-          <div className="content-stage">
-            <section className="page-intro">
+          <div className="content-stage px-4 md:px-8">
+            <section className="page-intro py-4 md:py-8">
               <div>
-                <h1>{sectionTitle}</h1>
-                <p>{sectionDescription}</p>
+                <h1 className="text-2xl md:text-4xl font-bold">{sectionTitle}</h1>
+                <p className="text-sm md:text-base text-muted-foreground">{sectionDescription}</p>
               </div>
-              <div className="page-intro__status">
+              <div className="page-intro__status hidden md:flex">
                 <Badge variant="outline">{t("statusLabel")}</Badge>
                 <span>{error || status}</span>
               </div>
+            </section>
+
+            <section className="workspace-strip">
+              <div className="workspace-strip__main">
+                <Badge variant="outline">{t("sourceFolder")}</Badge>
+                <span title={workspace?.summary.root ?? DEFAULT_WORKSPACE}>
+                  {workspace?.summary.root ?? DEFAULT_WORKSPACE}
+                </span>
+              </div>
+              <Button
+                disabled={initializingWorkspace}
+                onClick={handleChooseWorkspace}
+                type="button"
+                variant="outline"
+              >
+                <FolderOpen className="size-4" />
+                {initializingWorkspace ? t("workspaceOpening") : t("openWorkspace")}
+              </Button>
             </section>
 
             <section className="summary-grid">
@@ -499,43 +624,76 @@ function AppContent() {
                 </div>
 
                 <div className="article-list">
-                  {filteredPosts.map((post) => (
-                    <button
-                      className={cn(
-                        "article-row",
-                        post.fileName === selectedPostName && "article-row--active"
-                      )}
-                      key={post.fileName}
-                      onClick={() => handleSelectPost(post.fileName)}
-                      type="button"
-                    >
-                      <div className="article-row__main">
-                        <div className="article-row__title">
-                          {post.data.title || t("untitledPost")}
-                        </div>
-                        <div className="article-row__meta">
-                          <span className="article-status">
-                            <span
-                              className={cn(
-                                "article-status__dot",
-                                post.data.published && "article-status__dot--published"
-                              )}
-                            />
-                            {post.data.published ? t("published") : t("draft")}
-                          </span>
-                          <span className="article-row__meta-item">
-                            <CalendarDays className="size-3.5" />
-                            {formatPostDate(post.data.date, i18n.language, t("noDate"))}
-                          </span>
-                          {(post.data.tags || []).slice(0, 3).map((tag) => (
-                            <span className="tag-pill" key={tag}>
-                              {tag}
+                  {filteredPosts.length ? (
+                    filteredPosts.map((post) => (
+                      <div
+                        className={cn(
+                          "article-row",
+                          post.fileName === selectedPostName && "article-row--active"
+                        )}
+                        key={post.fileName}
+                      >
+                        <button
+                          className="article-row__main"
+                          onClick={() => handleSelectPost(post.fileName)}
+                          type="button"
+                        >
+                          <div className="article-row__title">
+                            {post.data.title || t("untitledPost")}
+                          </div>
+                          <div className="article-row__meta">
+                            <span className="article-status">
+                              <span
+                                className={cn(
+                                  "article-status__dot",
+                                  post.data.published && "article-status__dot--published"
+                                )}
+                              />
+                              {post.data.published ? t("published") : t("draft")}
                             </span>
-                          ))}
-                        </div>
+                            <span className="article-row__meta-item">
+                              <CalendarDays className="size-3.5" />
+                              {formatPostDate(post.data.date, i18n.language, t("noDate"))}
+                            </span>
+                            {(post.data.tags || []).slice(0, 3).map((tag) => (
+                              <span className="tag-pill" key={tag}>
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        </button>
+                        <Button
+                          aria-label={t("deleteArticle")}
+                          className="article-row__delete"
+                          disabled={deletingPost === post.fileName}
+                          onClick={() => handleDeletePost(post.fileName, post.data.title)}
+                          size="icon"
+                          type="button"
+                          variant="ghost"
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
                       </div>
-                    </button>
-                  ))}
+                    ))
+                  ) : (
+                    <div className="empty-state">
+                      <div className="empty-state__icon">
+                        <SquarePen className="size-5" />
+                      </div>
+                      <div>
+                        <h3>{keyword.trim() ? t("emptySearchTitle") : t("emptyPostsTitle")}</h3>
+                        <p>
+                          {keyword.trim()
+                            ? t("emptySearchDescription")
+                            : t("emptyPostsDescription")}
+                        </p>
+                      </div>
+                      <Button onClick={startNewPost} type="button">
+                        <Plus className="size-4" />
+                        {t("newArticle")}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </section>
             ) : null}
@@ -636,6 +794,30 @@ function AppContent() {
                     <h2>{t("remote")}</h2>
                     <p>{t("remoteIntro")}</p>
                   </div>
+                </div>
+
+                <div className="flex flex-col gap-6 mb-8">
+                  <Card className="bg-primary/5 border-primary/20">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-lg flex items-center gap-2">
+                        <Sparkles className="size-5 text-primary" />
+                        {t("publishCenter") || "Publish Center"}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="flex flex-wrap gap-4">
+                      <Button
+                        onClick={handleBuildSite}
+                        disabled={building}
+                        className="flex-1 md:flex-none"
+                      >
+                        {building ? t("building") : t("buildSite") || "Build Site"}
+                      </Button>
+                      <Button variant="outline" className="flex-1 md:flex-none" disabled>
+                        <Globe className="mr-2 size-4" />
+                        {t("syncToGithub") || "Sync to GitHub"}
+                      </Button>
+                    </CardContent>
+                  </Card>
                 </div>
 
                 <div className="settings-summary">
@@ -966,63 +1148,75 @@ function AppContent() {
         </SidebarInset>
 
         <Dialog onOpenChange={setEditorVisible} open={editorVisible}>
-          <DialogContent className="editor-overlay max-w-none border-0 p-0 shadow-none">
-            <div className="editor-overlay__topbar">
-              <div className="editor-overlay__title">
+          <DialogContent
+            className={cn(
+              "editor-overlay max-w-none border-0 p-0 shadow-none",
+              isMobile && "h-full w-full rounded-none"
+            )}
+          >
+            <div className="editor-overlay__topbar px-4 py-2">
+              <Button
+                onClick={() => setEditorVisible(false)}
+                size="icon"
+                variant="ghost"
+                className="editor-overlay__back"
+                type="button"
+                aria-label={t("editorBack")}
+              >
+                <ArrowLeft className="size-5" />
+              </Button>
+              <div className="editor-overlay__title hidden md:flex">
                 <Badge variant="outline">{t("editorSettings")}</Badge>
-                <span>{draft.data.title || t("untitledPost")}</span>
+                <span className="truncate max-w-[200px]">
+                  {draft.data.title || t("untitledPost")}
+                </span>
               </div>
-              <div className="editor-overlay__actions">
-                <Button
-                  className="toolbar-action"
-                  onClick={() => setEditorVisible(false)}
-                  size="icon"
-                  type="button"
-                  variant="outline"
-                >
-                  <ArrowLeft className="size-4" />
-                </Button>
+              <div className="editor-overlay__actions ml-auto">
                 <Button
                   className="toolbar-action"
                   disabled={savingPost || loadingPost}
                   onClick={() => handleSavePost(false)}
                   type="button"
                   variant="outline"
+                  size={isMobile ? "icon" : "default"}
                 >
                   <Check className="size-4" />
-                  <span>{t("saveDraft")}</span>
+                  {!isMobile && <span>{t("saveDraft")}</span>}
                 </Button>
                 <Button
                   disabled={savingPost || loadingPost}
                   onClick={() => handleSavePost(true)}
                   type="button"
+                  size={isMobile ? "icon" : "default"}
                 >
                   <Check className="size-4" />
-                  <span>{t("publishNow")}</span>
+                  {!isMobile && <span>{t("publishNow")}</span>}
                 </Button>
               </div>
             </div>
 
-            <div className="editor-overlay__content">
-              <div className="editor-main">
+            <div className="editor-overlay__content flex flex-col md:flex-row h-[calc(100%-48px)]">
+              <div className="editor-main flex-1 overflow-auto p-4">
                 <Input
-                  className="editor-title"
+                  className="editor-title text-2xl font-bold border-none px-0 focus-visible:ring-0"
                   onChange={(event) => updateDraft("data", "title", event.currentTarget.value)}
                   placeholder={t("title")}
                   value={draft.data.title}
                 />
                 <Textarea
-                  className="editor-textarea"
+                  className="editor-textarea mt-4 w-full h-full resize-none border-none px-0 focus-visible:ring-0 min-h-[500px]"
                   onChange={(event) => updateDraft("root", "content", event.currentTarget.value)}
                   placeholder={t("markdownContent")}
                   value={draft.content}
                 />
-                <div className="editor-footer">
-                  {draft.content ? t("writingIn") : t("editorEmpty")}
-                </div>
               </div>
 
-              <aside className="editor-sidepanel">
+              <aside
+                className={cn(
+                  "editor-sidepanel w-full md:w-80 border-t md:border-t-0 md:border-l p-4 overflow-auto bg-muted/30",
+                  isMobile && "hidden"
+                )}
+              >
                 <Accordion className="w-full" collapsible defaultValue="url" type="single">
                   <AccordionItem value="url">
                     <AccordionTrigger>{t("url")}</AccordionTrigger>
@@ -1145,7 +1339,7 @@ function AppContent() {
                   <CardContent className="p-5">
                     <div className="settings-form">
                       <SettingsField htmlFor="system-language" label={t("uiLanguage")}>
-                        <LanguagePicker onChange={setLanguage} value={language} />
+                        <LanguagePicker onChange={handleLanguageChange} value={language} />
                       </SettingsField>
                     </div>
                   </CardContent>
@@ -1188,12 +1382,6 @@ function AppContent() {
                     </div>
                   </CardContent>
                 </Card>
-              </div>
-
-              <div className="system-panel__footer">
-                <Button disabled={savingSystem} onClick={handleSaveSystem} type="button">
-                  {savingSystem ? t("saving") : t("save")}
-                </Button>
               </div>
             </div>
           </DialogContent>

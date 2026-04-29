@@ -257,6 +257,17 @@
   gap: 0.6rem;
 }
 
+.app-toolbar__summary {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.app-toolbar__actions {
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
 .app-toolbar__error {
   color: var(--destructive);
   font-size: 0.84rem;
@@ -282,6 +293,7 @@
 
 .toolbar-action,
 .toolbar-create {
+  flex-shrink: 0;
   height: 2.5rem;
   border-radius: 0.85rem;
 }
@@ -295,13 +307,15 @@
 }
 
 .toolbar-create {
+  white-space: nowrap;
   box-shadow: 0 16px 30px -26px color-mix(in srgb, black 45%, transparent);
 }
 
 .search-field {
   display: flex;
-  min-width: min(24rem, 100%);
-  flex: 1 1 18rem;
+  min-width: 0;
+  width: min(22rem, 42vw);
+  flex: 0 1 22rem;
   align-items: center;
   gap: 0.65rem;
   border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
@@ -316,6 +330,7 @@
 }
 
 .search-field input {
+  min-width: 0;
   height: 2.5rem;
   flex: 1;
   border: 0;
@@ -364,6 +379,34 @@
   gap: 0.7rem;
   color: var(--muted-foreground);
   font-size: 0.88rem;
+}
+
+.workspace-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.9rem;
+  width: 100%;
+  border-top: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+  padding: 0.75rem 0;
+}
+
+.workspace-strip__main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 0.7rem;
+  color: var(--muted-foreground);
+  font-size: 0.88rem;
+}
+
+.workspace-strip__main span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .summary-grid {
@@ -442,7 +485,9 @@
 }
 
 .article-row {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   border: 0;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
   border-radius: 0;
@@ -462,7 +507,24 @@
 
 .article-row__main {
   display: grid;
+  min-width: 0;
+  flex: 1;
   gap: 0.5rem;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  text-align: left;
+}
+
+.article-row__delete {
+  flex-shrink: 0;
+  opacity: 0.68;
+}
+
+.article-row__delete:hover {
+  color: var(--destructive);
+  opacity: 1;
 }
 
 .article-row__title {
@@ -506,6 +568,39 @@
   padding: 0;
   color: var(--muted-foreground);
   font-size: 0.78rem;
+}
+
+.empty-state {
+  display: grid;
+  justify-items: center;
+  gap: 1rem;
+  padding: 4.5rem 1.5rem;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
+.empty-state__icon {
+  display: grid;
+  height: 3rem;
+  width: 3rem;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--accent) 48%, transparent);
+  color: var(--foreground);
+}
+
+.empty-state h3 {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.empty-state p {
+  max-width: 28rem;
+  margin: 0.4rem auto 0;
+  line-height: 1.6;
 }
 
 .tag-grid,
@@ -636,6 +731,10 @@
   gap: 0.75rem;
 }
 
+.editor-overlay__back {
+  flex-shrink: 0;
+}
+
 .editor-overlay__title span {
   font-weight: 650;
 }
@@ -703,9 +802,13 @@
   max-height: calc(100vh - 2rem);
   transform: translate(-50%, -50%);
   background: transparent;
+  overflow: hidden;
 }
 
 .system-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: calc(100vh - 2rem);
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
   border-radius: 1.5rem;
@@ -750,8 +853,10 @@
 .system-panel__content {
   display: grid;
   gap: 1rem;
+  min-height: 0;
+  overflow-y: auto;
   padding-top: 1rem;
-  padding-bottom: 1rem;
+  padding-bottom: 1.35rem;
 }
 
 .system-card {
@@ -816,6 +921,11 @@
   .theme-grid {
     grid-template-columns: 1fr;
   }
+
+  .workspace-strip {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 @media (max-width: 640px) {
@@ -840,5 +950,43 @@
 
   .search-field {
     min-width: 100%;
+  }
+}
+
+/* Responsive Overrides */
+@media (max-width: 768px) {
+  .app-toolbar {
+    padding: 0.5rem 1rem;
+  }
+
+  .article-row {
+    padding: 1.2rem 1rem;
+    min-height: 80px;
+  }
+
+  .article-row__title {
+    font-size: 1.1rem;
+  }
+
+  .page-intro h1 {
+    font-size: 1.75rem;
+  }
+
+  .summary-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+
+  .editor-overlay__topbar {
+    height: 56px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .editor-main {
+    padding: 1rem;
+  }
+
+  .editor-title {
+    font-size: 1.5rem;
   }
 }

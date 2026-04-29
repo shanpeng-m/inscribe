@@ -1,0 +1,21 @@
+# 这是给用户博客使用的 GitHub Action 模板
+name: Deploy Blog
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Inscribe Site Generator
+        run: |
+          # 这里未来会通过 npx 或者远程 action 运行 inscribe-site build
+          echo "Building with Inscribe Site Generator..."

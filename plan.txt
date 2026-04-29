@@ -1,0 +1,84 @@
+# Inscribe Execution Plan
+
+Inscribe is a Tauri + React desktop publishing workspace inspired by Gridea's local source-folder model. The product keeps Markdown files as the source of truth, stores site configuration in the workspace, and builds a static site from local content.
+
+## Completed Foundation
+
+- [x] Monorepo layout:
+  - `apps/editor`: Tauri + React editor.
+  - `apps/site`: Vite static site renderer.
+  - `packages/core`: shared package placeholder for future parsing/types.
+  - `content/posts`: default development content.
+- [x] Basic editor workflow:
+  - Load workspace content.
+  - Browse, create, edit, save, and publish Markdown posts.
+  - Edit site/publish settings.
+  - Browse local themes.
+- [x] UI fixes:
+  - Article toolbar keeps the new-post action visible.
+  - Editor overlay has an explicit back action.
+  - Language/theme settings apply immediately.
+  - System settings panel is scrollable.
+- [x] Development scripts:
+  - Desktop editor, site preview, iOS forwarding, Rust checks, frontend/site builds.
+- [x] Site build:
+  - `apps/site` builds generated post data from Markdown.
+
+## MVP: Gridea-Inspired Local Workspace
+
+- [x] Workspace source-folder skeleton:
+  - `config/setting.json`
+  - `config/posts.json`
+  - `content/posts/`
+  - `content/post-images/`
+  - `themes/`
+  - `dist/`
+- [x] Workspace selection and initialization:
+  - Desktop directory picker.
+  - Non-destructive initialization of missing workspace files/folders.
+  - UI shows current source folder path and status.
+- [x] Post storage rules:
+  - Read `content/posts/` first.
+  - Read legacy `posts/` as a fallback.
+  - Write new and saved posts to `content/posts/`.
+  - Maintain `config/posts.json` as a generated index cache.
+- [x] Post deletion:
+  - Delete Markdown files from the active workspace.
+  - Refresh the generated post index.
+  - Remove workspace-local post media only when it lives under known media folders.
+- [x] Build command integration:
+  - Desktop build action runs root `pnpm build:site`.
+  - Internal SQLite fallback workspace returns an explicit unsupported-build error.
+
+## Beta
+
+- [ ] Local preview server:
+  - Launch and stop site preview from the editor.
+  - Show preview URL and build/runtime errors in the UI.
+- [ ] Git publishing:
+  - Add status, commit, and push flow.
+  - Support token-based GitHub Pages publishing first.
+  - Keep SSH and SFTP for later after the core Git flow is stable.
+- [ ] Media workflow:
+  - Import images into `content/post-images/`.
+  - Insert Markdown image links from the editor.
+  - Clean up unused media with confirmation.
+- [ ] Theme switching:
+  - Load installed themes from `themes/`.
+  - Save active theme in `config/setting.json`.
+  - Apply the selected theme in `apps/site`.
+
+## v1
+
+- [ ] Theme gallery and install/update flow.
+- [ ] GitHub Actions setup helper for Pages deployment.
+- [ ] Multi-workspace recent-projects list.
+- [ ] Mobile-focused write/commit/push workflow for iOS and iPadOS.
+- [ ] MDX and richer content blocks if they do not compromise Markdown portability.
+
+## Current Defaults
+
+- Desktop MVP comes first.
+- Markdown files remain the source of truth.
+- `config/posts.json` is generated cache, not the canonical post database.
+- Gridea is a product behavior reference, not a technology stack to copy.

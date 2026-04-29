@@ -1,0 +1,15 @@
+{
+  "name": "@inscribe/core",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "type-check": "tsc --noEmit --pretty false"
+  },
+  "dependencies": {
+    "gray-matter": "^4.0.3",
+    "isomorphic-git": "^1.25.10",
+    "unified": "^11.0.4"
+  }
+}

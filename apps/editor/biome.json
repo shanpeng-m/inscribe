@@ -19,6 +19,7 @@
       "!**/.git",
       "!**/dist",
       "!**/node_modules",
+      "!**/src/generated",
       "!**/src-tauri/capabilities",
       "!**/src-tauri/target",
       "!**/src-tauri/gen",
@@ -53,13 +54,13 @@
         "useImportType": "error"
       },
       "suspicious": {
-        "noConsole": "warn"
+        "noConsole": "off"
       }
     }
   },
   "vcs": {
     "clientKind": "git",
     "enabled": true,
-    "useIgnoreFile": true
+    "useIgnoreFile": false
   }
 }

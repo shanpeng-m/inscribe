@@ -1,0 +1,31 @@
+name: Editor CI
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'apps/editor/**'
+      - 'packages/**'
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+      
+      - name: Install dependencies
+        run: pnpm install
+        
+      - name: Lint and Typecheck
+        run: |
+          pnpm --filter inscribe-editor build:frontend
+          # Add more lint/test commands here

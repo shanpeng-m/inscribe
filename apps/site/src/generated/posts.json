@@ -1,0 +1,11 @@
+[
+  {
+    "title": "Hello Inscribe",
+    "date": "2026-04-29",
+    "tags": [
+      "General"
+    ],
+    "slug": "hello-inscribe",
+    "html": "<h1 id=\"欢迎使用-inscribe\">欢迎使用 Inscribe</h1>\n<p>这是一个由 <strong>Tauri + React</strong> 构建的本地博客编辑器。</p>\n<h2 id=\"核心特性\">核心特性</h2>\n<ul>\n<li><strong>三端通用</strong>：支持 macOS, iPadOS 和 iOS。</li>\n<li><strong>Git 同步</strong>：内置 isomorphic-git，随时随地发布。</li>\n<li><strong>SSG 构建</strong>：一键生成高性能静态网站。</li>\n</ul>"
+  }
+]

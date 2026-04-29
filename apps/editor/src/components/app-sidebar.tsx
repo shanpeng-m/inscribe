@@ -1,7 +1,7 @@
 import {
-  type LucideIcon,
   BadgeInfo,
   GitBranch,
+  type LucideIcon,
   MoonStar,
   Settings2,
   SunMedium,
